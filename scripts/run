@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+
+# run - Execute the compiled binary for the current CSES problem
+# Usage: run (from within any problem directory)
+# Author: Antigravity
+
+set -euo pipefail
+
+# ANSI color codes (only when outputting to a terminal)
+if [ -t 1 ]; then
+    COLOR_RED=$'\e[31m'
+    COLOR_GREEN=$'\e[32m'
+    COLOR_YELLOW=$'\e[33m'
+    COLOR_CYAN=$'\e[36m'
+    COLOR_RESET=$'\e[0m'
+else
+    COLOR_RED=""
+    COLOR_GREEN=""
+    COLOR_YELLOW=""
+    COLOR_CYAN=""
+    COLOR_RESET=""
+fi
+
+# Ensure we are inside a problem directory (must contain main.c)
+if [ ! -f "main.c" ]; then
+    echo "${COLOR_RED}Error: main.c not found in the current directory (${PWD}).${COLOR_RESET}" >&2
+    echo "${COLOR_YELLOW}Run this command from within a problem directory.${COLOR_RESET}" >&2
+    exit 1
+fi
+
+BIN=".build/main"
+
+# If the binary doesn't exist yet, offer to compile first
+if [ ! -f "$BIN" ]; then
+    echo "${COLOR_YELLOW}Binary not found. Compiling main.c first...${COLOR_RESET}"
+    mkdir -p .build
+    if ! gcc -Wall -Wextra -std=c11 -g main.c -o "$BIN"; then
+        echo "${COLOR_RED}Compilation failed!${COLOR_RESET}" >&2
+        exit 1
+    fi
+    echo "${COLOR_GREEN}Compilation successful!${COLOR_RESET}"
+    echo ""
+fi
+
+echo "${COLOR_CYAN}Running ${PWD##*/}${COLOR_RESET} — type your input below (Ctrl+D to finish):"
+echo ""
+
+exec "$BIN"
