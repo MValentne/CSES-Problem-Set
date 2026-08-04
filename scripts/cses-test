@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+
+# cses-test - CSES local test runner for C exercises
+# Author: Antigravity
+
+set -euo pipefail
+
+# ANSI color codes
+if [ -t 1 ]; then
+    COLOR_RED=$'\e[31m'
+    COLOR_GREEN=$'\e[32m'
+    COLOR_YELLOW=$'\e[33m'
+    COLOR_CYAN=$'\e[36m'
+    COLOR_RESET=$'\e[0m'
+else
+    COLOR_RED=""
+    COLOR_GREEN=""
+    COLOR_YELLOW=""
+    COLOR_CYAN=""
+    COLOR_RESET=""
+fi
+
+# Ensure we are in a directory containing main.c
+if [ ! -f "main.c" ]; then
+    echo -e "${COLOR_RED}Error: main.c not found in the current directory (${PWD}).${COLOR_RESET}" >&2
+    exit 1
+fi
+
+# Create .build directory
+mkdir -p .build
+
+echo -e "${COLOR_YELLOW}Compiling main.c...${COLOR_RESET}"
+# Compile using GCC with required flags
+if ! gcc -Wall -Wextra -std=c11 -g main.c -o .build/main; then
+    echo -e "${COLOR_RED}Compilation failed!${COLOR_RESET}" >&2
+    exit 1
+fi
+echo -e "${COLOR_GREEN}Compilation successful!${COLOR_RESET}\n"
+
+# Find all test inputs (.in files)
+# Using nullglob to prevent pattern from remaining literal if no files exist
+shopt -s nullglob
+in_files=( *.in )
+shopt -u nullglob
+
+if [ ${#in_files[@]} -eq 0 ]; then
+    echo -e "${COLOR_YELLOW}No test cases (*.in) found in the current directory.${COLOR_RESET}"
+    exit 0
+fi
+
+passed=0
+failed=0
+total=0
+
+# Iterate over test cases
+for in_file in "${in_files[@]}"; do
+    test_name="${in_file%.in}"
+    out_file="${test_name}.out"
+    
+    # Check if corresponding expected output exists
+    if [ ! -f "$out_file" ]; then
+        echo -e "${COLOR_RED}FAIL $test_name${COLOR_RESET} (Missing expected output file: $out_file)"
+        failed=$((failed + 1))
+        total=$((total + 1))
+        continue
+    fi
+    
+    # Create a temporary file for the actual output
+    actual_out=$(mktemp)
+    
+    # Run the compiled program with redirected input
+    # Redirect stderr to stdout so we can capture any warnings/crashes
+    if ! .build/main < "$in_file" > "$actual_out" 2>&1; then
+        # Note: we still check the output even if the program crashed
+        true
+    fi
+    
+    # Compare with expected output using diff -u
+    if diff_output=$(diff -u "$out_file" "$actual_out" 2>&1); then
+        echo -e "${COLOR_GREEN}PASS $test_name${COLOR_RESET}"
+        passed=$((passed + 1))
+    else
+        echo -e "${COLOR_RED}FAIL $test_name${COLOR_RESET}"
+        echo "$diff_output"
+        failed=$((failed + 1))
+    fi
+    
+    total=$((total + 1))
+    rm -f "$actual_out"
+done
+
+# Print summary
+echo -e "\n${COLOR_CYAN}Summary:${COLOR_RESET}"
+echo -e "Tests:  $total"
+echo -e "Passed: ${COLOR_GREEN}$passed${COLOR_RESET}"
+echo -e "Failed: $( [ "$failed" -gt 0 ] && echo -e "${COLOR_RED}$failed${COLOR_RESET}" || echo "$failed" )"
+
+# Exit with non-zero status if any test failed
+if [ "$failed" -gt 0 ]; then
+    exit 1
+fi
+
+exit 0

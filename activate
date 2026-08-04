@@ -1,0 +1,13 @@
+# Sourcing this file prepends the project's scripts/ directory to the PATH.
+# Usage: source activate (or . activate)
+
+# Resolve the absolute path of the scripts directory relative to this script
+ACTIVATE_DIR="$( cd "$( dirname "${BASH_SOURCE[0]:-$0}" )" && pwd )"
+
+if [[ ":$PATH:" != *":$ACTIVATE_DIR/scripts:"* ]]; then
+    export PATH="$ACTIVATE_DIR/scripts:$PATH"
+    echo -e "\e[32mCSES Testing Environment activated!\e[0m"
+    echo -e "The 'cses-test' command is now available in your PATH."
+else
+    echo -e "\e[33mCSES Testing Environment is already active.\e[0m"
+fi
