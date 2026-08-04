@@ -40,11 +40,19 @@ echo -e "${COLOR_GREEN}Compilation successful!${COLOR_RESET}\n"
 # Find all test inputs (.in files)
 # Using nullglob to prevent pattern from remaining literal if no files exist
 shopt -s nullglob
-in_files=( *.in )
+in_files=()
+if [ -d "tests" ]; then
+    in_files=( tests/*.in )
+fi
+
+# Fallback to current directory if no test inputs found in tests/
+if [ ${#in_files[@]} -eq 0 ]; then
+    in_files=( *.in )
+fi
 shopt -u nullglob
 
 if [ ${#in_files[@]} -eq 0 ]; then
-    echo -e "${COLOR_YELLOW}No test cases (*.in) found in the current directory.${COLOR_RESET}"
+    echo -e "${COLOR_YELLOW}No test cases (*.in) found in the current directory or 'tests' folder.${COLOR_RESET}"
     exit 0
 fi
 
@@ -56,10 +64,11 @@ total=0
 for in_file in "${in_files[@]}"; do
     test_name="${in_file%.in}"
     out_file="${test_name}.out"
+    display_name=$(basename "$test_name")
     
     # Check if corresponding expected output exists
     if [ ! -f "$out_file" ]; then
-        echo -e "${COLOR_RED}FAIL $test_name${COLOR_RESET} (Missing expected output file: $out_file)"
+        echo -e "${COLOR_RED}FAIL $display_name${COLOR_RESET} (Missing expected output file: $out_file)"
         failed=$((failed + 1))
         total=$((total + 1))
         continue
@@ -77,10 +86,10 @@ for in_file in "${in_files[@]}"; do
     
     # Compare with expected output using diff -u
     if diff_output=$(diff -u "$out_file" "$actual_out" 2>&1); then
-        echo -e "${COLOR_GREEN}PASS $test_name${COLOR_RESET}"
+        echo -e "${COLOR_GREEN}PASS $display_name${COLOR_RESET}"
         passed=$((passed + 1))
     else
-        echo -e "${COLOR_RED}FAIL $test_name${COLOR_RESET}"
+        echo -e "${COLOR_RED}FAIL $display_name${COLOR_RESET}"
         echo "$diff_output"
         failed=$((failed + 1))
     fi
