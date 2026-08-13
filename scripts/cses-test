@@ -21,18 +21,27 @@ else
 fi
 
 # Ensure we are in a directory containing main.c
-if [ ! -f "main.c" ]; then
-    echo -e "${COLOR_RED}Error: main.c not found in the current directory (${PWD}).${COLOR_RESET}" >&2
+# Determine source file (C or C++)
+if [ -f "main.cpp" ]; then
+    SRC_FILE="main.cpp"
+    COMPILER="g++"
+    COMPILER_FLAGS="-Wall -Wextra -std=c++17 -g"
+elif [ -f "main.c" ]; then
+    SRC_FILE="main.c"
+    COMPILER="gcc"
+    COMPILER_FLAGS="-Wall -Wextra -std=c11 -g"
+else
+    echo -e "${COLOR_RED}Error: main.c or main.cpp not found in the current directory (${PWD}).${COLOR_RESET}"
     exit 1
 fi
 
 # Create .build directory
 mkdir -p .build
 
-echo -e "${COLOR_YELLOW}Compiling main.c...${COLOR_RESET}"
+echo -e "${COLOR_YELLOW}Compiling $SRC_FILE...${COLOR_RESET}"
 # Compile using GCC with required flags
-if ! gcc -Wall -Wextra -std=c11 -g main.c -o .build/main; then
-    echo -e "${COLOR_RED}Compilation failed!${COLOR_RESET}" >&2
+if ! $COMPILER $COMPILER_FLAGS "$SRC_FILE" -o .build/main; then
+    echo -e "${COLOR_RED}Compilation failed!${COLOR_RESET}"
     exit 1
 fi
 echo -e "${COLOR_GREEN}Compilation successful!${COLOR_RESET}\n"
