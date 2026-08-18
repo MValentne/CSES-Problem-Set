@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# cses-test - CSES local test runner for C exercises
+# cses-test - CSES local test runner for C/C++ exercises
 # Author: Antigravity
 
 set -euo pipefail
@@ -25,11 +25,11 @@ fi
 if [ -f "main.cpp" ]; then
     SRC_FILE="main.cpp"
     COMPILER="g++"
-    COMPILER_FLAGS="-Wall -Wextra -std=c++17 -g"
+COMPILER_FLAGS=(-Wall -Wextra -std=c++17 -g)
 elif [ -f "main.c" ]; then
     SRC_FILE="main.c"
     COMPILER="gcc"
-    COMPILER_FLAGS="-Wall -Wextra -std=c11 -g"
+COMPILER_FLAGS=(-Wall -Wextra -std=c11 -g)
 else
     echo -e "${COLOR_RED}Error: main.c or main.cpp not found in the current directory (${PWD}).${COLOR_RESET}"
     exit 1
@@ -40,7 +40,7 @@ mkdir -p .build
 
 echo -e "${COLOR_YELLOW}Compiling $SRC_FILE...${COLOR_RESET}"
 # Compile using GCC with required flags
-if ! $COMPILER $COMPILER_FLAGS "$SRC_FILE" -o .build/main; then
+if ! "$COMPILER" "${COMPILER_FLAGS[@]}" "$SRC_FILE" -o .build/main; then
     echo -e "${COLOR_RED}Compilation failed!${COLOR_RESET}"
     exit 1
 fi
@@ -74,7 +74,7 @@ for in_file in "${in_files[@]}"; do
     test_name="${in_file%.in}"
     out_file="${test_name}.out"
     display_name=$(basename "$test_name")
-    
+
     # Check if corresponding expected output exists
     if [ ! -f "$out_file" ]; then
         echo -e "${COLOR_RED}FAIL $display_name${COLOR_RESET} (Missing expected output file: $out_file)"
@@ -82,17 +82,17 @@ for in_file in "${in_files[@]}"; do
         total=$((total + 1))
         continue
     fi
-    
+
     # Create a temporary file for the actual output
     actual_out=$(mktemp)
-    
+
     # Run the compiled program with redirected input
     # Redirect stderr to stdout so we can capture any warnings/crashes
     if ! .build/main < "$in_file" > "$actual_out" 2>&1; then
         # Note: we still check the output even if the program crashed
         true
     fi
-    
+
     # Compare with expected output using diff -u
     if diff_output=$(diff -u "$out_file" "$actual_out" 2>&1); then
         echo -e "${COLOR_GREEN}PASS $display_name${COLOR_RESET}"
@@ -102,7 +102,7 @@ for in_file in "${in_files[@]}"; do
         echo "$diff_output"
         failed=$((failed + 1))
     fi
-    
+
     total=$((total + 1))
     rm -f "$actual_out"
 done

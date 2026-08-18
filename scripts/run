@@ -21,9 +21,17 @@ else
     COLOR_RESET=""
 fi
 
-# Ensure we are inside a problem directory (must contain main.c)
-if [ ! -f "main.c" ]; then
-    echo "${COLOR_RED}Error: main.c not found in the current directory (${PWD}).${COLOR_RESET}" >&2
+# Determine source file and compiler (C or C++)
+if [ -f "main.cpp" ]; then
+    SRC_FILE="main.cpp"
+    COMPILER="g++"
+    COMPILER_FLAGS=(-Wall -Wextra -std=c++17 -g)
+elif [ -f "main.c" ]; then
+    SRC_FILE="main.c"
+    COMPILER="gcc"
+    COMPILER_FLAGS=(-Wall -Wextra -std=c11 -g)
+else
+    echo "${COLOR_RED}Error: main.c or main.cpp not found in the current directory (${PWD}).${COLOR_RESET}" >&2
     echo "${COLOR_YELLOW}Run this command from within a problem directory.${COLOR_RESET}" >&2
     exit 1
 fi
@@ -32,9 +40,9 @@ BIN=".build/main"
 
 # If the binary doesn't exist yet, offer to compile first
 if [ ! -f "$BIN" ]; then
-    echo "${COLOR_YELLOW}Binary not found. Compiling main.c first...${COLOR_RESET}"
+    echo "${COLOR_YELLOW}Binary not found. Compiling $SRC_FILE first...${COLOR_RESET}"
     mkdir -p .build
-    if ! gcc -Wall -Wextra -std=c11 -g main.c -o "$BIN"; then
+    if ! "$COMPILER" "${COMPILER_FLAGS[@]}" "$SRC_FILE" -o "$BIN"; then
         echo "${COLOR_RED}Compilation failed!${COLOR_RESET}" >&2
         exit 1
     fi
