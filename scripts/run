@@ -1,56 +1,34 @@
 #!/usr/bin/env bash
 
 # run - Execute the compiled binary for the current CSES problem
-# Usage: run (from within any problem directory)
-# Author: Antigravity
+#
+# Usage:
+#   run                interactive mode (type input, Ctrl+D to finish)
+#   run tests/3.in     feed a specific input file
+#   run <args...>      any extra args are passed to your program
+#
+# The binary is rebuilt automatically if main.cpp/main.c changed.
 
 set -euo pipefail
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_lib.sh"
 
-# ANSI color codes (only when outputting to a terminal)
-if [ -t 1 ]; then
-    COLOR_RED=$'\e[31m'
-    COLOR_GREEN=$'\e[32m'
-    COLOR_YELLOW=$'\e[33m'
-    COLOR_CYAN=$'\e[36m'
-    COLOR_RESET=$'\e[0m'
-else
-    COLOR_RED=""
-    COLOR_GREEN=""
-    COLOR_YELLOW=""
-    COLOR_CYAN=""
-    COLOR_RESET=""
-fi
-
-# Determine source file and compiler (C or C++)
-if [ -f "main.cpp" ]; then
-    SRC_FILE="main.cpp"
-    COMPILER="g++"
-    COMPILER_FLAGS=(-Wall -Wextra -std=c++17 -g)
-elif [ -f "main.c" ]; then
-    SRC_FILE="main.c"
-    COMPILER="gcc"
-    COMPILER_FLAGS=(-Wall -Wextra -std=c11 -g)
-else
-    echo "${COLOR_RED}Error: main.c or main.cpp not found in the current directory (${PWD}).${COLOR_RESET}" >&2
-    echo "${COLOR_YELLOW}Run this command from within a problem directory.${COLOR_RESET}" >&2
-    exit 1
-fi
-
-BIN=".build/main"
-
-# If the binary doesn't exist yet, offer to compile first
-if [ ! -f "$BIN" ]; then
-    echo "${COLOR_YELLOW}Binary not found. Compiling $SRC_FILE first...${COLOR_RESET}"
-    mkdir -p .build
-    if ! "$COMPILER" "${COMPILER_FLAGS[@]}" "$SRC_FILE" -o "$BIN"; then
-        echo "${COLOR_RED}Compilation failed!${COLOR_RESET}" >&2
-        exit 1
+INPUT_FILE=""
+ARGS=()
+while [ $# -gt 0 ]; do
+    if [ -z "$INPUT_FILE" ] && [[ "$1" == *.in ]] && [ -f "$1" ]; then
+        INPUT_FILE="$1"
+    else
+        ARGS+=("$1")
     fi
-    echo "${COLOR_GREEN}Compilation successful!${COLOR_RESET}"
-    echo ""
+    shift
+done
+
+_ensure_binary   # rebuilds automatically if source is newer than the binary
+
+if [ -n "$INPUT_FILE" ]; then
+    .build/main "${ARGS[@]}" < "$INPUT_FILE"
+else
+    printf '%sRunning %s%s%s — type your input below (Ctrl+D to finish):%s\n\n' \
+        "$C_CYAN" "$C_BOLD" "${PWD##*/}" "$C_RESET" "$C_RESET"
+    .build/main "${ARGS[@]}"
 fi
-
-echo "${COLOR_CYAN}Running ${PWD##*/}${COLOR_RESET} — type your input below (Ctrl+D to finish):"
-echo ""
-
-exec "$BIN"

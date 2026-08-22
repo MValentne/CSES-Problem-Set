@@ -1,0 +1,237 @@
+#!/usr/bin/env bash
+
+# test - Compile (if needed) and run the problem against its test cases
+#
+# Usage:
+#   test               run every test in tests/ (or *.in next to main.cpp)
+#   test 2             run only tests/2.in
+#   test 1 3           run tests/1.in and tests/3.in
+#   test 1-5           run a range of tests
+#
+# Options:
+#   -t, --timeout SEC  time limit per test (default: ${CSES_TIMEOUT:-15}, 0 = no limit)
+#   -v, --verbose      also print the input and full program stderr on failures
+#   -l, --list         list available tests without running them
+#   -h, --help         show this help
+
+set -euo pipefail
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_lib.sh"
+
+TIMEOUT="${CSES_TIMEOUT:-15}"
+[[ "$TIMEOUT" =~ ^[0-9]+$ ]] || _die "CSES_TIMEOUT must be numeric"
+VERBOSE=0
+LIST_ONLY=0
+declare -a WANTED=()
+
+usage() { sed -n '2,17p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0; }
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -t|--timeout) TIMEOUT="$2"; shift 2 ;;
+        -v|--verbose) VERBOSE=1; shift ;;
+        -l|--list)    LIST_ONLY=1; shift ;;
+        -h|--help)    usage ;;
+        [0-9]*|[0-9]*-[0-9]*) WANTED+=("$1"); shift ;;
+        *) _die "Unknown option or invalid test id '$1' (try --help)" ;;
+    esac
+done
+
+_find_tests_dir
+if [ "$LIST_ONLY" -eq 1 ]; then
+    printf 'tests found (%s):\n' "$(pwd)"
+    _list_in_files | sed 's/^/  /'
+    exit 0
+fi
+
+if [ -z "$TESTS_DIR" ]; then
+    _die "No test cases found (looked in tests/*.in and ./*.in)."
+fi
+
+# --- Build -------------------------------------------------------------------
+_ensure_binary   # rebuilds automatically if source is newer than the binary
+
+# --- Resolve which tests to run ----------------------------------------------
+mapfile -t ALL_TESTS < <(_list_in_files)
+
+resolve_wanted() {
+    local -a selected=()
+    local item n from to found
+    local -A seen=()
+    for item in "${WANTED[@]}"; do
+        if [[ "$item" == *-* ]]; then
+            from="${item%-*}"; to="${item#*-}"
+            if ! [[ "$from" =~ ^[0-9]+$ && "$to" =~ ^[0-9]+$ ]] || [ "$from" -gt "$to" ]; then
+                _die "Invalid range '$item'"
+            fi
+            for (( n=from; n<=to; n++ )); do selected+=("$n"); done
+        else
+            [[ "$item" =~ ^[0-9]+$ ]] || _die "Invalid test id '$item'"
+            selected+=("$item")
+        fi
+    done
+    # Map numbers to existing files, keeping order
+    RESOLVED=()
+    for n in "${selected[@]}"; do
+        found=0
+        for f in "${ALL_TESTS[@]}"; do
+            base="$(basename "$f" .in)"
+            if [[ "$base" =~ ^0*[0-9]+$ ]] && [ $((10#$base)) -eq "$n" ]; then
+                if [ -z "${seen[$f]:-}" ]; then RESOLVED+=("$f"); seen[$f]=1; fi
+                found=1; break
+            fi
+        done
+        if [ $found -eq 0 ]; then
+            printf '%sunavailable:%s test %s — available: %s\n' \
+                "$C_RED" "$C_RESET" "$n" \
+                "$(printf '%s ' "${ALL_TESTS[@]#$TESTS_DIR/}" | sed 's/\.in\>/ /g')"
+            exit 1
+        fi
+    done
+    if [ ${#RESOLVED[@]} -eq 0 ]; then
+        RESOLVED=("${ALL_TESTS[@]}")
+    fi
+    return 0
+}
+resolve_wanted
+
+# --- Run ----------------------------------------------------------------------
+WORKDIR="$(mktemp -d)"
+trap 'rm -rf "$WORKDIR"' EXIT
+
+signal_name() {
+    case "$1" in
+        139) echo "SIGSEGV (segfault)" ;;
+        136) echo "SIGFPE (division by zero / arithmetic error)" ;;
+        134) echo "SIGABRT (abort — often an assert or sanitizer)" ;;
+        137) echo "SIGKILL" ;;
+        *)   echo "signal $(( $1 - 128 ))" ;;
+    esac
+}
+
+print_diff() { # colorized, truncated unified diff
+    local diff_out max=40 total
+    diff_out=$(diff -u --strip-trailing-cr --label expected --label got "$1" "$2" || true)
+    total=$(printf '%s\n' "$diff_out" | wc -l)
+    while IFS= read -r line; do
+        case "$line" in
+            +++*|---*|'@@'*) printf '%s%s%s\n' "$C_CYAN" "$line" "$C_RESET" ;;
+            +*)              printf '%s%s%s\n' "$C_GREEN" "$line" "$C_RESET" ;;
+            -*)              printf '%s%s%s\n' "$C_RED" "$line" "$C_RESET" ;;
+            *)               printf '%s\n' "$line" ;;
+        esac
+    done < <(printf '%s\n' "$diff_out" | head -n "$max")
+    if [ "$total" -gt "$max" ]; then
+        printf '%s... %d more lines hidden (use -v to see everything)%s\n' \
+            "$C_DIM" $((total - max)) "$C_RESET"
+    fi
+}
+
+normalized() { sed 's/[[:space:]]*$//' "$1"; }
+
+total_start=$(_now_ms)
+passed=0 failed=0 warned=0 idx=0 count=${#RESOLVED[@]}
+
+printf '%s── %s ── binary: .build/main · limit: %ss/test%s\n\n' \
+    "$C_BOLD" "$(basename "$(pwd)")" "$TIMEOUT" "$C_RESET"
+
+for in_file in "${RESOLVED[@]}"; do
+    idx=$((idx + 1))
+    name="$(basename "$in_file" .in)"
+    out_file="${in_file%.in}.out"
+    got="$WORKDIR/$name.got"
+    err="$WORKDIR/$name.err"
+
+    printf '%s[%d/%d]%s %s/%s.in ' "$C_DIM" "$idx" "$count" "$C_RESET" "$TESTS_DIR" "$name"
+
+    start=$(_now_ms)
+    rc=0
+    # The outer redirection silences bash's own "Segmentation fault" notice;
+    # the program's real stderr is captured separately into $err.
+    if [ "$TIMEOUT" -gt 0 ] && command -v timeout > /dev/null; then
+        { timeout --foreground "$TIMEOUT" ".build/main" < "$in_file" > "$got" 2> "$err"; } 2>/dev/null || rc=$?
+    else
+        { ".build/main" < "$in_file" > "$got" 2> "$err"; } 2>/dev/null || rc=$?
+    fi
+    elapsed=$(( $(_now_ms) - start ))
+
+    # --- Classify result ------------------------------------------------------
+    verdict=""
+    if [ "$rc" -eq 124 ]; then
+        verdict="TLE"
+    elif [ "$rc" -ne 0 ]; then
+        verdict="RTE"
+    elif [ ! -f "$out_file" ]; then
+        verdict="WARN"
+    else
+        if cmp -s "$out_file" "$got"; then
+            verdict="PASS"
+        elif [ "$(normalized "$out_file")" = "$(normalized "$got")" ]; then
+            verdict="PASS_WS"
+        else
+            verdict="FAIL"
+        fi
+    fi
+
+    case "$verdict" in
+        PASS)
+            printf '%sPASS%s (%s)\n' "$C_GREEN" "$C_RESET" "$(_fmt_ms "$elapsed")"
+            passed=$((passed + 1))
+            ;;
+        PASS_WS)
+            printf '%sPASS%s (%s) %s[only trailing whitespace differs]%s\n' \
+                "$C_GREEN" "$C_RESET" "$(_fmt_ms "$elapsed")" "$C_DIM" "$C_RESET"
+            passed=$((passed + 1))
+            ;;
+        TLE|FAIL|RTE)
+            detail=""
+            [ "$verdict" = TLE ] && detail="(limit ${TIMEOUT}s)"
+            if [ "$verdict" = RTE ]; then
+                if [ "$rc" -gt 128 ]; then
+                    detail="(exit code $rc — $(signal_name "$rc"))"
+                else
+                    detail="(exit code $rc)"
+                fi
+            fi
+            [ "$verdict" = FAIL ] && detail="($(_fmt_ms "$elapsed"))"
+            printf '%s%s%s %s\n' "$C_RED" "$verdict" "$C_RESET" "$detail"
+            failed=$((failed + 1))
+
+            if [ "$VERBOSE" -eq 1 ]; then
+                printf '%s--- input (%s/%s.in) ---%s\n' "$C_DIM" "$TESTS_DIR" "$name" "$C_RESET"
+                head -30 "$in_file" | sed 's/^/  │ /'
+                local_lines=$(wc -l < "$in_file")
+                [ "$local_lines" -gt 30 ] && printf '  %s(%d more input lines)%s\n' "$C_DIM" $((local_lines - 30)) "$C_RESET"
+            fi
+
+            if [ "$verdict" != TLE ] && [ -f "$out_file" ]; then
+                printf '%s--- diff (%s/%s.out vs actual output) ---%s\n' "$C_DIM" "$TESTS_DIR" "$name" "$C_RESET"
+                print_diff "$out_file" "$got"
+            elif [ "$verdict" != TLE ]; then
+                printf '%s(no %s/%s.out to compare against)%s\n' "$C_DIM" "$TESTS_DIR" "$name" "$C_RESET"
+            fi
+
+            if [ -s "$err" ]; then
+                printf '%s--- stderr ---%s\n' "$C_DIM" "$C_RESET"
+                head -15 "$err" | sed 's/^/  /'
+                err_lines=$(wc -l < "$err")
+                [ "$err_lines" -gt 15 ] && printf '  %s(%d more stderr lines)%s\n' "$C_DIM" $((err_lines - 15)) "$C_RESET"
+            elif [ "$verdict" = FAIL ] && [ ! -s "$got" ]; then
+                printf '%sgot: (empty output)%s\n' "$C_DIM" "$C_RESET"
+            fi
+            ;;
+        WARN)
+            printf '%sWARN%s no %s/%s.out — output produced:\n' "$C_YELLOW" "$C_RESET" "$TESTS_DIR" "$name"
+            head -20 "$got" | sed 's/^/  │ /'
+            warned=$((warned + 1))
+            ;;
+    esac
+done
+
+total_ms=$(( $(_now_ms) - total_start ))
+printf '\n%sSummary:%s %d/%d passed' "$C_BOLD" "$C_RESET" "$passed" "$count"
+[ "$failed" -gt 0 ] && printf ', %s%d failed%s' "$C_RED" "$failed" "$C_RESET"
+[ "$warned" -gt 0 ] && printf ', %s%d without .out%s' "$C_YELLOW" "$warned" "$C_RESET"
+printf ' · total %s\n' "$(_fmt_ms "$total_ms")"
+
+if [ "$failed" -gt 0 ]; then exit 1; fi
+exit 0

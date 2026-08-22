@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+
+# build - Compile the current problem into .build/main
+# Usage:
+#   build              release build (-O2, the one CSES judges use)
+#   build --debug      no optimization, easier debugging
+#   build --sanitize   AddressSanitizer + UBSan (catches UB and memory bugs)
+#   build --clean      remove the .build directory
+# Extra flags can be injected with:  CSES_CXXFLAGS="-DLOCAL" build
+
+set -euo pipefail
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_lib.sh"
+
+MODE="release"
+FORCE=0
+
+usage() {
+    sed -n '2,10p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    exit 0
+}
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -r|--release)  MODE="release" ;;
+        -d|--debug)    MODE="debug" ;;
+        -s|--sanitize) MODE="sanitize" ;;
+        -f|--force)    FORCE=1 ;;
+        --clean)
+            rm -rf .build
+            printf '%s✓ removed .build/%s\n' "$C_GREEN" "$C_RESET"
+            exit 0
+            ;;
+        -h|--help) usage ;;
+        *) _die "Unknown option '$1' (try --help)" ;;
+    esac
+    shift
+done
+
+_detect_source
+if [ "$FORCE" -eq 1 ]; then
+    rm -f ".build/main"
+fi
+_ensure_binary "$MODE"
